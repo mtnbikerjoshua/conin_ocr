@@ -15,8 +15,9 @@ def show_wait_destroy(winname, img):
 #### Line Detection ####
 # --------------------------------------------------------------------- #
 
-legajo = 2109
-legajo_encoded = legajo ^ 2344
+legajo = "2109"
+legajo_n = 2109
+legajo_encoded = legajo_n ^ 2344
 
 # Load and threshold the image
 image = cv.imread(f'data/Data Tables/Legajo_{legajo}.jpeg', cv.IMREAD_GRAYSCALE)
@@ -98,7 +99,6 @@ vertical_con_bin = cv.threshold(vertical_convoluted, 240, 255, cv.THRESH_BINARY)
 
 con_bin = cv.bitwise_or(horizontal_con_bin, vertical_con_bin).astype(np.uint8)
 
-show_wait_destroy("con_bin", con_bin)
 
 # open_h = cv.morphologyEx(boundaries, cv.MORPH_CLOSE, cv.getStructuringElement(cv.MORPH_RECT, (1, 20)))
 # open_v = cv.morphologyEx(boundaries, cv.MORPH_CLOSE, cv.getStructuringElement(cv.MORPH_RECT, (20, 1)))
@@ -106,8 +106,6 @@ show_wait_destroy("con_bin", con_bin)
 bound_blur = cv.GaussianBlur(con_bin, (5, 7), 0)
 bound_thresh = cv.threshold(bound_blur, 200, 255, cv.THRESH_BINARY)[1]
 morph = cv.morphologyEx(bound_thresh, cv.MORPH_CLOSE, cv.getStructuringElement(cv.MORPH_RECT, (80, 7)))
-
-show_wait_destroy("morph", morph)
 
 ### Probabilistic Hough Transform ###
 # --------------------------------------------------------------------- #
@@ -120,8 +118,89 @@ for line in lines:
     x1, y1, x2, y2 = line[0]
     cv.line(hough_lines, (x1, y1), (x2, y2), (255, 255, 255), 2)
 
-# Combine the detected lines and the convoluted image
-combined = cv.bitwise_or(hough_lines, con_bin)
+# Extend lines to the edge of the image
+horizontal_lines = []
+vertical_lines = []
+for line in lines:
+    x1, y1, x2, y2 = line[0]
+    # Check if the line is vertical
+    if x2 - x1 == 0:
+        # Set the slope to infinity
+        slope = float('inf')
+        
+        # Extend the line to the top and bottom edges of the image
+        x1_extended = x1
+        y1_extended = 0
+        x2_extended = x2
+        y2_extended = image.shape[0]
+    else:
+        # Calculate the slope of the line
+        slope = (y2 - y1) / (x2 - x1)
+    
+        # Extend the line to the left and right edges of the image
+        x1_extended = 0
+        y1_extended = int(y1 - slope * x1)
+        x2_extended = image.shape[1]
+        y2_extended = int(y2 + slope * (x2_extended - x2))
+    
+    if slope > 5:
+        vertical_lines.append([(x1_extended, y1_extended, x2_extended, y2_extended)])
+    else:
+        horizontal_lines.append([(x1_extended, y1_extended, x2_extended, y2_extended)])
+
+# Cluster lines if either end of the line is close
+def cluster_lines(lines, is_vertical):
+    clusters = []
+    for line in lines:
+        if is_vertical:
+            pos1 = 0
+            pos2 = 2
+        else:
+            pos1 = 1
+            pos2 = 3
+        position = np.array([line[0][pos1], line[0][pos2]])
+        found_cluster = False
+        for cluster in clusters:
+            cluster_pos = np.array([cluster[0][0][pos1], cluster[0][0][pos2]])
+            if np.any(np.abs(position - cluster_pos) < 70):
+                cluster.append(line)
+                found_cluster = True
+                break
+        if not found_cluster:
+            clusters.append([line])
+    return clusters
+
+# Find the median of each cluster
+def median_cluster(cluster):
+    lines = np.array(cluster)
+    median = np.median(lines, axis=0)
+    return [tuple(median[0])]
+
+# Cluster lines if either end of the line is close
+clustered_horizontal_lines = cluster_lines(horizontal_lines, is_vertical=False)
+clustered_vertical_lines = cluster_lines(vertical_lines, is_vertical=True)
+
+# Find the median of each cluster
+median_horizontal_lines = [median_cluster(cluster) for cluster in clustered_horizontal_lines]
+median_vertical_lines = [median_cluster(cluster) for cluster in clustered_vertical_lines]
+
+# Draw the detected lines on a blank image
+detected_lines = np.zeros_like(cropped)
+for line in median_horizontal_lines + median_vertical_lines:
+    x1, y1, x2, y2 = line[0]
+    cv.line(detected_lines, (int(x1), int(y1)), (int(x2), int(y2)), (255, 255, 255), 2)
+
+# Create a color copy of the cropped image
+color_cropped = cv.cvtColor(cropped, cv.COLOR_GRAY2BGR)
+
+# Draw the detected lines on the color copy
+for line in median_horizontal_lines + median_vertical_lines:
+    x1, y1, x2, y2 = line[0]
+    cv.line(color_cropped, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
+
+show_wait_destroy("color_cropped", color_cropped)
+
+combined = detected_lines
 
 ### Split the table into cells ###
 # --------------------------------------------------------------------- #
@@ -131,8 +210,6 @@ combined[0, :] = 255
 combined[-1, :] = 255
 combined[:, 0] = 255
 combined[:, -1] = 255
-
-show_wait_destroy("combined", combined)
 
 # Find the cells in the table as contours
 contours, _ = cv.findContours(combined, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
@@ -206,23 +283,41 @@ def sort_table_cells(contours):
 
 sorted_contours = sort_table_cells(contours)
 
+filtered_contours = []
+for contour in sorted_contours:
+    x, y, w, h = cv.boundingRect(contour)
+    if w > 30 and h > 30 and w*h > 8000:
+        filtered_contours.append(contour) 
+
+# Concatenate the points from the first three contours into one contour
+name_head = cv.convexHull(np.concatenate(filtered_contours[:3]))
+name_data = cv.convexHull(np.concatenate(filtered_contours[3:10]))
+legajo_head = cv.convexHull(np.concatenate(filtered_contours[10:12]))
+legajo_data = cv.convexHull(np.concatenate(filtered_contours[12]))
+dob_head = cv.convexHull(np.concatenate(filtered_contours[13:16]))
+dob_data = cv.convexHull(np.concatenate(filtered_contours[16:23]))
+weekday_head = cv.convexHull(np.concatenate(filtered_contours[23:25]))
+weekday_data = cv.convexHull(np.concatenate(filtered_contours[25]))
+
+head_contours = [name_head, name_data, legajo_head, legajo_data, dob_head, dob_data, weekday_head, weekday_data]
+all_contours = head_contours + filtered_contours[26:]
 
 # Find the bounding rects of the cells in preparation for perspective transformation and cropping
 rotated_rects = []
 bounding_rects = []
 contour_corners = []
 cropped_corners = []
-for contour in sorted_contours:
+for contour in all_contours:
+    # Find the bounding rectangle of the contour
+    x, y, w, h = cv.boundingRect(contour)
+    bounding_rects.append((x, y, w, h))
+
     # Find the rotated bounding rectangle of the contour
     rect = cv.minAreaRect(contour)
     box = cv.boxPoints(rect)
     box = np.intp(box)
     rotated_rects.append(box)
-    
-    # Find the bounding rectangle of the contour
-    x, y, w, h = cv.boundingRect(contour)
-    bounding_rects.append((x, y, w, h))
-    
+
     # Extract the corners of the rotated rectangle
     corners = box.reshape(4, 2)
     contour_corners.append(corners)
@@ -240,7 +335,7 @@ cropped_images = []
 for rect in bounding_rects:
     x, y, w, h = rect
     cropped_image = cropped[y:y+h, x:x+w]
-    if cropped_image.shape[0] > 30 and cropped_image.shape[1] > 30 and cropped_image.size > 8000: cropped_images.append(cropped_image)
+    cropped_images.append(cropped_image)
 
 
 # Warp the cropped images using the cropped corners
@@ -302,6 +397,9 @@ for i in range(cells.shape[0]):
                 column = "signature"
         cv.imwrite(f'{output_path}/cell_{legajo_encoded}_{column}_{i}.png', cells[i, j])
 
+# Save the first 8 warped images
+for i in range(8):
+    cv.imwrite(f'{output_path}/warped_image_{i}.png', warped_images[i])
 
 # Encode each cell as base64
 encoded_cells = np.empty(cells.shape, dtype=object)

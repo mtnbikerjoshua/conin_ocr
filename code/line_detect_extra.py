@@ -208,6 +208,38 @@ median_vertical_lines = [median_cluster(cluster) for cluster in clustered_vertic
 #     x1, y1, x2, y2 = line[0]
 #     cv.line(cropped, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
 
+###################################################################
+# Cluster the horizontal lines
+horizontal_center_points = []
+horizontal_lines_filtered = []
+for line in horizontal_lines:
+    center = (line[0][1] + line[0][3]) / 2
+    if center > 30 and center < image.shape[0] - 30:
+        horizontal_center_points.append(center)
+        horizontal_lines_filtered.append(line)
+horizontal_k = 20
+horizontal_criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 100, 0.1)
+_, horizontal_labels, horizontal_centers = cv.kmeans(np.float32(horizontal_center_points), horizontal_k, None, horizontal_criteria, 10, cv.KMEANS_RANDOM_CENTERS)
+
+# Group the horizontal lines into clusters
+horizontal_line_clusters = [[] for _ in range(horizontal_k)]
+for i, label in enumerate(horizontal_labels):
+    horizontal_line_clusters[label].append(horizontal_lines_filtered[i])
+
+# Cluster the vertical lines
+vertical_center_points = np.float32([(line[0][0] + line[0][2]) / 2 for line in vertical_lines])
+
+vertical_k = 12
+vertical_criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 100, 0.1)
+_, vertical_labels, vertical_centers = cv.kmeans(np.float32(vertical_center_points), vertical_k, None, vertical_criteria, 10, cv.KMEANS_RANDOM_CENTERS)
+
+# Group the vertical lines into clusters
+vertical_line_clusters = [[] for _ in range(vertical_k)]
+for i, label in enumerate(vertical_labels):
+    vertical_line_clusters[label].append(vertical_lines[i])
+
+############################################################################
+
 # Display the blank image with the detected lines
 # show_wait_destroy('Average Lines', cropped)
 # Use the bounding rects to crop into new images
