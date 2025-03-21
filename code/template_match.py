@@ -13,8 +13,8 @@ def show_wait_destroy(winname, img):
 #### Line Detection ####
 # --------------------------------------------------------------------- #
 
-legajo = "2215"
-legajo_n = 2215
+legajo = "2108"
+legajo_n = 2108
 legajo_encoded = legajo_n ^ 2344
 
 # Load and threshold the image
@@ -45,18 +45,24 @@ show_wait_destroy("Boundaries", boundaries)
 show_wait_destroy("Intersections", intersections)
 
 
-#### Align Image to Template ####
+#### Load the Templates ####
 # --------------------------------------------------------------------- #
 
-template_path = 'data/blank_template_1.png'
-template_grayscale = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
-_, template = cv2.threshold(template_grayscale, 0, 255, cv2.THRESH_BINARY)
+def load_template(template_name):
+    template_path = f'data/Templates/{template_name}.png'
+    template_grayscale = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
+    _, template = cv2.threshold(template_grayscale, 0, 255, cv2.THRESH_BINARY)
 
-# Resize the template to match the width of the input image
-scale_factor = image.shape[1] / template.shape[1]
-new_height = int(template.shape[0] * scale_factor)
-new_width = image.shape[1]
-template_resized = cv2.resize(template_grayscale, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+    # Resize the template to match the width of the input image
+    scale_factor = image.shape[1] / template.shape[1]
+    new_height = int(template.shape[0] * scale_factor)
+    new_width = image.shape[1]
+    template_resized = cv2.resize(template_grayscale, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+    return template_resized
+
+template_names = ["blank_template_1", "blank_template_2"]
+templates = [load_template(template_name) for template_name in template_names]
+
 
 def get_table_corners(image):
     # Find the contour aproximation of the table
@@ -78,36 +84,7 @@ def get_table_corners(image):
     sorted_corners[3] = corners[np.argmax(diff_corners)]
     return(sorted_corners)
 
-detected_corners = get_table_corners(boundaries)
-template_corners = get_table_corners(template_resized)
-
-
-# Compute the homography matrix using the detected corners and template corners
-H, status = cv2.findHomography(detected_corners, template_corners)
-
-# Warp the boundaries image using the homography matrix
-aligned_boundaries = cv2.warpPerspective(boundaries, H, (template_resized.shape[1], template_resized.shape[0]))
-aligned_intersections = cv2.warpPerspective(intersections, H, (template_resized.shape[1], template_resized.shape[0]))
-aligned_image = cv2.warpPerspective(image, H, (template_resized.shape[1], template_resized.shape[0]))
-
-# Draw the resized template on the aligned image in red
-aligned_display = cv2.cvtColor(aligned_image, cv2.COLOR_GRAY2BGR)
-aligned_display[:, :, 0][template_resized > 0] = 0
-aligned_display[:, :, 1][template_resized > 0] = 0
-aligned_display[:, :, 2][template_resized > 0] = 255
-
-
-show_wait_destroy("Aligned Image with Template", aligned_display)
-
-
-### Correct for Radial Distortion ###
-# --------------------------------------------------------------------- #
-
-template_horizontal = cv2.morphologyEx(template_resized, cv2.MORPH_OPEN, horizontal_kernel)
-template_vertical = cv2.morphologyEx(template_resized, cv2.MORPH_OPEN, vertical_kernel)
-template_intersections = cv2.bitwise_and(template_horizontal, template_vertical)
-
-# Get a list of (x, y) corner coordinates
+# Get a list of (x, y) intersection coordinates
 def findCentroids(image):
     contours, _ = cv2.findContours(image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     centroids = []
@@ -121,59 +98,94 @@ def findCentroids(image):
             centroids.append((0, 0))
     return centroids
 
-template_centroids = findCentroids(template_intersections)
-detected_centroids = findCentroids(aligned_intersections)
+def calculate_points(image, boundaries, intersections, template):
+    detected_corners = get_table_corners(boundaries)
+    template_corners = get_table_corners(template)
 
-# Display the template and detected centroids
-black_background = np.zeros((image.shape[0], image.shape[1], 3), dtype=np.uint8)
-for (x, y) in template_centroids:
-    cv2.circle(black_background, (int(x), int(y)), 3, (255, 0, 0), -1)  # Blue
-for (x, y) in detected_centroids:
-    cv2.circle(black_background, (int(x), int(y)), 3, (0, 0, 255), -1)  # Red
-show_wait_destroy("Detected Centroids (Red) and Template Centroids (Blue)", black_background)
+    # Compute the homography matrix using the detected corners and template corners
+    H, status = cv2.findHomography(detected_corners, template_corners)
 
-# Find the nearest neighbors for each detected centroid
-tree = cKDTree(template_centroids)
-distances, indices = tree.query(detected_centroids)
+    # Warp the boundaries image using the homography matrix
+    aligned_boundaries = cv2.warpPerspective(boundaries, H, (template.shape[1], template.shape[0]))
+    aligned_intersections = cv2.warpPerspective(intersections, H, (template.shape[1], template.shape[0]))
+    aligned_image = cv2.warpPerspective(image, H, (template.shape[1], template.shape[0]))
 
-# Set a distance threshold to filter out outliers
-threshold = 20
-matched_pairs = {}
-to_remove = set()
-
-# Iterate through detected centroids and match with template centroids
-for detected_idx, (dist, template_idx) in enumerate(zip(distances, indices)):
-    if dist < threshold:
-        if template_idx in matched_pairs:
-            # If a template point already has a match, mark all as duplicates
-            to_remove.add(template_idx)
-            to_remove.add(matched_pairs[template_idx])
-        matched_pairs[template_idx] = detected_idx
-
-# Remove duplicated matches
-template_points = []
-detected_points = []
-
-for template_idx, detected_idx in matched_pairs.items():
-    if template_idx not in to_remove:
-        template_points.append(template_centroids[template_idx])
-        detected_points.append(detected_centroids[detected_idx])
-
-# Display the template and detected centroids
-black_background = np.zeros((image.shape[0], image.shape[1], 3), dtype=np.uint8)
-for (x, y) in template_points:
-    cv2.circle(black_background, (int(x), int(y)), 3, (255, 0, 0), -1)  # Blue
-for (x, y) in detected_points:
-    cv2.circle(black_background, (int(x), int(y)), 3, (0, 0, 255), -1)  # Red
-show_wait_destroy("Detected Centroids (Red) and Template Centroids (Blue)", black_background)
+    # Draw the resized template on the aligned image in red
+    aligned_display = cv2.cvtColor(aligned_image, cv2.COLOR_GRAY2BGR)
+    aligned_display[:, :, 0][template > 0] = 0
+    aligned_display[:, :, 1][template > 0] = 0
+    aligned_display[:, :, 2][template > 0] = 255
 
 
-# Convert the control points into shape (N, 2) for skimage
-template_points_sk = np.array(template_points, dtype=np.float32).reshape(-1, 2)
-detected_points_sk = np.array(detected_points, dtype=np.float32).reshape(-1, 2)
+    show_wait_destroy("Aligned Image with Template", aligned_display)
+
+
+    template_horizontal = cv2.morphologyEx(template, cv2.MORPH_OPEN, horizontal_kernel)
+    template_vertical = cv2.morphologyEx(template, cv2.MORPH_OPEN, vertical_kernel)
+    template_intersections = cv2.bitwise_and(template_horizontal, template_vertical)
+
+    template_centroids = findCentroids(template_intersections)
+    detected_centroids = findCentroids(aligned_intersections)
+
+    # Display the template and detected centroids
+    black_background = np.zeros((image.shape[0], image.shape[1], 3), dtype=np.uint8)
+    for (x, y) in template_centroids:
+        cv2.circle(black_background, (int(x), int(y)), 3, (255, 0, 0), -1)  # Blue
+    for (x, y) in detected_centroids:
+        cv2.circle(black_background, (int(x), int(y)), 3, (0, 0, 255), -1)  # Red
+    show_wait_destroy("Detected Centroids (Red) and Template Centroids (Blue)", black_background)
+
+    # Find the nearest neighbors for each detected centroid
+    tree = cKDTree(template_centroids)
+    distances, indices = tree.query(detected_centroids)
+
+    # Set a distance threshold to filter out outliers
+    threshold = 20
+    matched_pairs = {}
+    to_remove = set()
+
+    # Iterate through detected centroids and match with template centroids
+    for detected_idx, (dist, template_idx) in enumerate(zip(distances, indices)):
+        if dist < threshold:
+            if template_idx in matched_pairs:
+                # If a template point already has a match, mark all as duplicates
+                to_remove.add(template_idx)
+                to_remove.add(matched_pairs[template_idx])
+            matched_pairs[template_idx] = detected_idx
+
+    # Remove duplicated matches
+    template_points = []
+    detected_points = []
+
+    for template_idx, detected_idx in matched_pairs.items():
+        if template_idx not in to_remove:
+            template_points.append(template_centroids[template_idx])
+            detected_points.append(detected_centroids[detected_idx])
+
+    # Display the template and detected centroids
+    black_background = np.zeros((image.shape[0], image.shape[1], 3), dtype=np.uint8)
+    for (x, y) in template_points:
+        cv2.circle(black_background, (int(x), int(y)), 3, (255, 0, 0), -1)  # Blue
+    for (x, y) in detected_points:
+        cv2.circle(black_background, (int(x), int(y)), 3, (0, 0, 255), -1)  # Red
+    show_wait_destroy("Detected Centroids (Red) and Template Centroids (Blue)", black_background)
+
+
+    # Convert the control points into shape (N, 2) for skimage
+    template_points = np.array(template_points, dtype=np.float32).reshape(-1, 2)
+    detected_points = np.array(detected_points, dtype=np.float32).reshape(-1, 2)
+
+    return([detected_points, template_points, aligned_image])
+
+alignments = [calculate_points(image, boundaries, intersections, template) for template in templates]
+n_matches = [alignment[0].shape[0] for alignment in alignments]
+
+best_alignment_index = np.argmax(n_matches)
+detected_points, template_points, aligned_image = alignments[best_alignment_index]
+template = templates[best_alignment_index]
 
 tps = skimage.transform.ThinPlateSplineTransform()
-tps.estimate(template_points_sk, detected_points_sk)
+tps.estimate(template_points, detected_points)
 image_transformed = skimage.transform.warp(aligned_image, tps, order=0)
 
 show_wait_destroy("Transformed Image", aligned_image)
@@ -181,9 +193,9 @@ show_wait_destroy("Transformed Image", image_transformed)
 
 
 transformed_display = cv2.cvtColor(image_transformed, cv2.COLOR_GRAY2BGR)
-transformed_display[:, :, 0][template_resized > 0] = 0
-transformed_display[:, :, 1][template_resized > 0] = 0
-transformed_display[:, :, 2][template_resized > 0] = 255
+transformed_display[:, :, 0][template > 0] = 0
+transformed_display[:, :, 1][template > 0] = 0
+transformed_display[:, :, 2][template > 0] = 255
 
 
 show_wait_destroy("Aligned Image with Template", transformed_display)
