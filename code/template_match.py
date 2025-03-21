@@ -1,6 +1,9 @@
+import sys
 import numpy as np
 from scipy.spatial import cKDTree
 import cv2
+import os
+import re
 import skimage.transform
 
 def show_wait_destroy(winname, img):
@@ -10,15 +13,26 @@ def show_wait_destroy(winname, img):
     cv2.destroyWindow(winname)
     cv2.waitKey(1)
 
+# Maximum distance between template and image intersection to be considered a match
+max_match_distance = 30
+
 #### Line Detection ####
 # --------------------------------------------------------------------- #
 
-legajo = "2108"
-legajo_n = 2108
-legajo_encoded = legajo_n ^ 2344
+image_file = sys.argv[1]
+legajo = re.sub(r'^.*Legajo_(.*) \d{4}-\d{2}-\d{2}.*$|^.*(Desconocido_.*) \d{4}-\d{2}-\d{2}.*$', r'\1\2', image_file)
+page = re.sub(r'^.*page_(\d+).*$', r'\1', image_file)
+# legajo_n = int(re.sub(r'\D', '', legajo))
+# if 'T' in legajo:
+#     legajo_n = legajo_n * 100 + 99
+# elif 'G' in legajo:
+#     legajo_n = legajo_n * 100 + 98
+# legajo_encoded = legajo_n ^ 2344
+
+print(f"Transforming Legajo {legajo} Page {page}")
 
 # Load and threshold the image
-image = cv2.imread(f'data/Data Tables/Legajo_{legajo}.jpeg', cv2.IMREAD_GRAYSCALE)
+image = cv2.imread(image_file, cv2.IMREAD_GRAYSCALE)
 
 width = 1000
 scale = 1000/image.shape[1]
@@ -33,7 +47,7 @@ show_wait_destroy("Threshholded", thresholded)
 
 # Use morphological operations to find horizontal and vertical lines
 horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 1))
-vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 65))
+vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 50))
 
 horizontal_lines = cv2.morphologyEx(thresholded, cv2.MORPH_OPEN, horizontal_kernel)
 vertical_lines = cv2.morphologyEx(thresholded, cv2.MORPH_OPEN, vertical_kernel)
@@ -60,7 +74,7 @@ def load_template(template_name):
     template_resized = cv2.resize(template_grayscale, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
     return template_resized
 
-template_names = ["blank_template_1", "blank_template_2"]
+template_names = [os.path.splitext(f)[0] for f in os.listdir('data/Templates') if f.endswith('.png')]
 templates = [load_template(template_name) for template_name in template_names]
 
 
@@ -140,13 +154,12 @@ def calculate_points(image, boundaries, intersections, template):
     distances, indices = tree.query(detected_centroids)
 
     # Set a distance threshold to filter out outliers
-    threshold = 20
     matched_pairs = {}
     to_remove = set()
 
     # Iterate through detected centroids and match with template centroids
     for detected_idx, (dist, template_idx) in enumerate(zip(distances, indices)):
-        if dist < threshold:
+        if dist < max_match_distance:
             if template_idx in matched_pairs:
                 # If a template point already has a match, mark all as duplicates
                 to_remove.add(template_idx)
@@ -199,3 +212,5 @@ transformed_display[:, :, 2][template > 0] = 255
 
 
 show_wait_destroy("Aligned Image with Template", transformed_display)
+
+cv2.imwrite(f"output/template_matching/Legajo_{legajo}_page_{page}.png", transformed_display)
