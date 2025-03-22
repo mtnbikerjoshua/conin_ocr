@@ -6,6 +6,7 @@ import os
 import re
 import skimage.transform
 import math
+import csv
 
 def show_wait_destroy(winname, img):
     cv2.imshow(winname, img)
@@ -21,8 +22,6 @@ max_match_distance = 20
 # --------------------------------------------------------------------- #
 
 image_file = sys.argv[1]
-# image_file = "data/Grid Images/Legajo_2215 2024-07-29 12_32_10_page_6.png"
-# image_file = "data/Grid Images/Legajo_2150 2024-07-29 12_25_38_page_6.png"
 legajo = re.sub(r'^.*Legajo_(.*) \d{4}-\d{2}-\d{2}.*$|^.*(Desconocido_.*) \d{4}-\d{2}-\d{2}.*$', r'\1\2', image_file)
 page = re.sub(r'^.*page_(\d+).*$', r'\1', image_file)
 # legajo_n = int(re.sub(r'\D', '', legajo))
@@ -102,6 +101,7 @@ def load_template(template_name):
     return template_resized
 
 template_names = [os.path.splitext(f)[0] for f in os.listdir('data/Templates') if f.endswith('.png')]
+template_names.sort()
 templates = [load_template(template_name) for template_name in template_names]
 
 
@@ -266,3 +266,11 @@ transformed_display[:, :, 2][template > 0] = 255
 # show_wait_destroy("Aligned Image with Template", transformed_display)
 
 cv2.imwrite(f"output/template_matching/Legajo_{legajo}_page_{page}.png", transformed_display)
+output_csv = "output/template_matching.csv"
+file_exists = os.path.isfile(output_csv)
+
+with open(output_csv, mode='a', newline='') as file:
+    writer = csv.writer(file)
+    if not file_exists:
+        writer.writerow(['legajo', 'page', 'template_index'])
+    writer.writerow([legajo, page, best_alignment_index])
