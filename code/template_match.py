@@ -155,7 +155,7 @@ def calculate_points(template):
     # Warp the boundaries image using the homography matrix
     aligned_boundaries = cv2.warpPerspective(boundaries, H, (template.shape[1], template.shape[0]))
     aligned_intersections = cv2.warpPerspective(intersections, H, (template.shape[1], template.shape[0]))
-    aligned_image = cv2.warpPerspective(image, H, (template.shape[1], template.shape[0]))
+    aligned_image = cv2.warpPerspective(image, H, (template.shape[1], template.shape[0]), borderValue = 255)
     aligned_horizontal_lines = cv2.warpPerspective(horizontal_lines, H, (template.shape[1], template.shape[0]))
 
     # Draw the resized template on the aligned image in red
@@ -251,7 +251,7 @@ template = templates[best_alignment_index]
 
 tps = skimage.transform.ThinPlateSplineTransform()
 tps.estimate(template_points, detected_points)
-image_transformed = skimage.transform.warp(aligned_image, tps, order=0)
+image_transformed = skimage.transform.warp(aligned_image, tps, order=0, cval = 255)
 
 # show_wait_destroy("Transformed Image", aligned_image)
 # show_wait_destroy("Transformed Image", image_transformed)
@@ -265,7 +265,7 @@ transformed_display[:, :, 2][template > 0] = 255
 
 # show_wait_destroy("Aligned Image with Template", transformed_display)
 
-cv2.imwrite(f"output/template_matching/Legajo_{legajo}_page_{page}.png", transformed_display)
+cv2.imwrite(f"output/template_matching/Legajo_{legajo}_page_{page}.png", image_transformed)
 output_csv = "output/template_matching.csv"
 file_exists = os.path.isfile(output_csv)
 
