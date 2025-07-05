@@ -4,6 +4,7 @@ import cv2
 import re
 import pandas as pd
 import warnings
+import os
 
 def show_wait_destroy(winname, img):
     cv2.imshow(winname, img)
@@ -15,6 +16,13 @@ def show_wait_destroy(winname, img):
 image_file = sys.argv[1]
 legajo = re.sub(r'^.*Legajo_(.*)_page.*$', r'\1', image_file)
 page = re.sub(r'^.*page_(\d+).*$', r'\1', image_file)
+
+legajo_n = int(re.sub(r'\D', '', legajo))
+if 'T' in legajo:
+    legajo_n = legajo_n * 100 + 99
+elif 'G' in legajo:
+    legajo_n = legajo_n * 100 + 98
+legajo_encoded = legajo_n ^ 2344
 
 image = cv2.imread(image_file, cv2.IMREAD_GRAYSCALE)
 template_matches = pd.read_csv("output/template_matching.csv")
@@ -97,11 +105,45 @@ for i, cnt in enumerate(contours):
     if hierarchy[0][i][3] != -1:
         level2_contours.append(cnt)
 
-rects = [cv2.boundingRect(cnt) for cnt in level2_contours]
+table_shape = ()
+n_headers = 0
+col_names = []
+match template_index:
+    case 0:
+        table_shape = (18, 13)
+        n_headers = 21
+        col_names = ["date", "age", "weight", "height", "head_circumference", "bmi", "head_cir_z", "weight_age_z", "height_age_z", "weight_height_z", "bmi_z", "diagnosis", "signature"]
+    case 1:
+        table_shape = (19, 13)
+        n_headers = 13
+        col_names = ["date", "age", "weight", "height", "head_circumference", "bmi", "head_cir_z", "weight_age_z", "height_age_z", "weight_height_z", "bmi_z", "diagnosis", "signature"]
+    case 2:
+        table_shape = (19, 12)
+        n_headers = 18
+        col_names = ["date", "age", "weight", "height", "bmi", "head_cir_z", "weight_age_z", "height_age_z", "weight_height_z", "bmi_z", "diagnosis", "signature"]
+    case 3:
+        table_shape = (20, 14)
+        n_headers = 22
+        col_names = ["date", "age", "weight", "height", "head_circumference", "weight_age", "height_age", "weight_height", "bmi", "weight_z", "height_z", "weight_height_z", "diagnosis", "signature"]
+    case 4:
+        table_shape = (19, 12)
+        n_headers = 12
+        col_names = ["date", "age", "weight", "height", "bmi", "head_cir_z", "weight_age_z", "height_age_z", "weight_height_z", "bmi_z", "diagnosis", "signature"]
 
-cropped_images = []
-for rect in rects:
-    x, y, w, h = rect
-    cropped_image = image[y:y+h, x:x+w]
-    cropped_images.append(cropped_image)
-    cv2.imwrite(f"output/test_images/test_image_{x}_{y}.png", cropped_image)
+rects = [cv2.boundingRect(cnt) for cnt in level2_contours]
+rects.reverse()
+rects = np.array(rects[n_headers:]).reshape(table_shape + (4,))
+
+cells = np.empty((rects.shape[0], rects.shape[1]), dtype=object)
+for i in range(rects.shape[0]):
+    for j in range(rects.shape[1]):
+        x, y, w, h = rects[i, j]
+        cells[i, j] = image[y:y+h, x:x+w]
+
+# Save the images
+output_path = f'output/chopped/{legajo}_page_{page}'
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+for i in range(cells.shape[0]):
+    for j in range(cells.shape[1]):
+        cv2.imwrite(f'{output_path}/cell_{legajo_encoded}_{col_names[j]}_{i}.png', cells[i, j])
