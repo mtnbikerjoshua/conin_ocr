@@ -5,3 +5,4 @@ output/*
 code/api_key.py
 */__pycache__/*
 *.code-workspace
+.Rproj.user
